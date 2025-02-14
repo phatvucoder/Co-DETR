@@ -551,17 +551,26 @@ class CocoDataset(CustomDataset):
                         nm = self.coco.loadCats(catId)[0]
                         precision = precisions[:, :, idx, 0, -1]
                         precision = precision[precision > -1]
-                        if precision.size:
-                            ap = np.mean(precision)
-                        else:
-                            ap = float('nan')
+                        
+                        # Calculate AP at different IoU thresholds
+                        ap_50 = float(cocoEval.eval['precision'][0, :, idx, 0, -1].mean())
+                        ap_75 = float(cocoEval.eval['precision'][5, :, idx, 0, -1].mean())
+                        ap = np.mean(precision) if precision.size else float('nan')
+                        
+                        # Calculate recall
+                        recall = float(cocoEval.eval['recall'][:, idx, 0, -1].mean())
+                        
                         results_per_category.append(
-                            (f'{nm["name"]}', f'{float(ap):0.3f}'))
+                            (f'{nm["name"]}',
+                             f'{float(ap):0.3f}',
+                             f'{float(ap_50):0.3f}',
+                             f'{float(ap_75):0.3f}',
+                             f'{float(recall):0.3f}'))
 
                     num_columns = min(6, len(results_per_category) * 2)
                     results_flatten = list(
                         itertools.chain(*results_per_category))
-                    headers = ['category', 'AP'] * (num_columns // 2)
+                    headers = ['category', 'AP', 'AP50', 'AP75', 'Recall']
                     results_2d = itertools.zip_longest(*[
                         results_flatten[i::num_columns]
                         for i in range(num_columns)
