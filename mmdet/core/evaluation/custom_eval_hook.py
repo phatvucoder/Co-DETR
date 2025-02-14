@@ -6,11 +6,68 @@ from mmcv.runner import EvalHook as BaseEvalHook
 from terminaltables import AsciiTable
 from mmcv.utils import print_log
 from torch.nn.modules.batchnorm import _BatchNorm
+import numpy as np
 
 class CustomEvalHook(BaseEvalHook):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.latest_results = None
+
+    def _format_metrics_table(self, eval_results, runner):
+        """Format evaluation results into a nice table."""
+        try:
+            # Headers for the table
+            headers = ['Class', 'Loss_cls', 'Loss_bbox', 'AP', 'AP50', 'AP75', 'AR', 'F1']
+            table_data = [headers]
+            
+            # Get per-class results
+            if 'classwise' in eval_results:
+                results_per_class = {}
+                for item in eval_results['classwise']:
+                    class_name = item[0]
+                    ap = float(item[1])
+                    ap50 = float(item[2])
+                    ap75 = float(item[3])
+                    ar = float(item[4])
+                    # Calculate F1 score (harmonic mean of precision and recall)
+                    f1 = 2 * (ap50 * ar) / (ap50 + ar) if (ap50 + ar) > 0 else 0
+                    
+                    # Get class-specific losses if available
+                    loss_cls = runner.outputs['log_vars'].get(f'd0.loss_cls_{class_name}', 0.0)
+                    loss_bbox = runner.outputs['log_vars'].get(f'd0.loss_bbox_{class_name}', 0.0)
+                    
+                    results_per_class[class_name] = [
+                        class_name,
+                        f'{loss_cls:.3f}',
+                        f'{loss_bbox:.3f}',
+                        f'{ap:.3f}',
+                        f'{ap50:.3f}',
+                        f'{ap75:.3f}',
+                        f'{ar:.3f}',
+                        f'{f1:.3f}'
+                    ]
+                
+                # Add per-class rows
+                table_data.extend([results_per_class[k] for k in sorted(results_per_class.keys())])
+                
+                # Add mean values row
+                mean_row = [
+                    'Mean',
+                    f'{runner.outputs["log_vars"].get("loss_cls", 0.0):.3f}',
+                    f'{runner.outputs["log_vars"].get("loss_bbox", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP_50", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP_75", 0.0):.3f}',
+                    f'{eval_results.get("AR@100", 0.0):.3f}',
+                    '-'  # No mean F1
+                ]
+                table_data.append(mean_row)
+                
+                table = AsciiTable(table_data)
+                return table.table
+            return ""
+        except Exception as e:
+            return f"Error formatting table: {str(e)}"
 
     def _do_evaluate(self, runner):
         """Perform evaluation and print detailed information."""
@@ -22,49 +79,14 @@ class CustomEvalHook(BaseEvalHook):
         self.latest_results = results
         runner.log_buffer.output['eval_iter_num'] = len(self.dataloader)
         
-        # Get all evaluation metrics
+        # Get evaluation results
         eval_results = self.evaluate(runner, results)
         if eval_results is None:
             return None
-        
-        # Print per-class AP if available
-        if 'classwise' in eval_results:
-            try:
-                headers = ['Category', 'AP', 'AP50', 'AP75']
-                table_data = [headers]
-                
-                # Organize per-class results
-                for item in eval_results['classwise']:
-                    if len(item) >= 4:  # Making sure we have all metrics
-                        category, ap, ap50, ap75 = item[:4]
-                        table_data.append([
-                            category,
-                            f'{float(ap):0.3f}',
-                            f'{float(ap50):0.3f}',
-                            f'{float(ap75):0.3f}'
-                        ])
-                
-                table = AsciiTable(table_data)
-                print_log('\nPer-class evaluation:', logger=runner.logger)
-                print_log('\n' + table.table, logger=runner.logger)
-            except Exception as e:
-                print_log(f'\nError in printing per-class results: {str(e)}', 
-                         logger=runner.logger)
 
-        # Print detailed metrics
-        print_log('\nOverall metrics:', logger=runner.logger)
-        for metric, value in eval_results.items():
-            if isinstance(value, float):
-                print_log(f'{metric}: {value:.4f}', logger=runner.logger)
-            elif isinstance(value, str) and metric.endswith('copypaste'):
-                print_log(f'{metric}: {value}', logger=runner.logger)
-
-        # Print current losses
-        if hasattr(runner, 'outputs') and 'log_vars' in runner.outputs:
-            print_log('\nCurrent Training Losses:', logger=runner.logger)
-            for name, value in runner.outputs['log_vars'].items():
-                print_log(f'{name}: {value:.4f}', logger=runner.logger)
-
+        # Format and print metrics table
+        table = self._format_metrics_table(eval_results, runner)
+        print_log('\nDetection Performance:\n' + table, logger=runner.logger)
         return eval_results
 
 class CustomDistEvalHook(BaseDistEvalHook):
@@ -72,9 +94,64 @@ class CustomDistEvalHook(BaseDistEvalHook):
         super().__init__(*args, **kwargs)
         self.latest_results = None
 
+    def _format_metrics_table(self, eval_results, runner):
+        """Format evaluation results into a nice table."""
+        try:
+            # Headers for the table
+            headers = ['Class', 'Loss_cls', 'Loss_bbox', 'AP', 'AP50', 'AP75', 'AR', 'F1']
+            table_data = [headers]
+            
+            # Get per-class results
+            if 'classwise' in eval_results:
+                results_per_class = {}
+                for item in eval_results['classwise']:
+                    class_name = item[0]
+                    ap = float(item[1])
+                    ap50 = float(item[2])
+                    ap75 = float(item[3])
+                    ar = float(item[4])
+                    # Calculate F1 score
+                    f1 = 2 * (ap50 * ar) / (ap50 + ar) if (ap50 + ar) > 0 else 0
+                    
+                    # Get class-specific losses if available
+                    loss_cls = runner.outputs['log_vars'].get(f'd0.loss_cls_{class_name}', 0.0)
+                    loss_bbox = runner.outputs['log_vars'].get(f'd0.loss_bbox_{class_name}', 0.0)
+                    
+                    results_per_class[class_name] = [
+                        class_name,
+                        f'{loss_cls:.3f}',
+                        f'{loss_bbox:.3f}',
+                        f'{ap:.3f}',
+                        f'{ap50:.3f}',
+                        f'{ap75:.3f}',
+                        f'{ar:.3f}',
+                        f'{f1:.3f}'
+                    ]
+                
+                # Add per-class rows
+                table_data.extend([results_per_class[k] for k in sorted(results_per_class.keys())])
+                
+                # Add mean values row
+                mean_row = [
+                    'Mean',
+                    f'{runner.outputs["log_vars"].get("loss_cls", 0.0):.3f}',
+                    f'{runner.outputs["log_vars"].get("loss_bbox", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP_50", 0.0):.3f}',
+                    f'{eval_results.get("bbox_mAP_75", 0.0):.3f}',
+                    f'{eval_results.get("AR@100", 0.0):.3f}',
+                    '-'  # No mean F1
+                ]
+                table_data.append(mean_row)
+                
+                table = AsciiTable(table_data)
+                return table.table
+            return ""
+        except Exception as e:
+            return f"Error formatting table: {str(e)}"
+
     def _do_evaluate(self, runner):
         """Perform evaluation with detailed metrics in distributed setting."""
-        # Synchronize BatchNorm statistics
         if self.broadcast_bn_buffer:
             model = runner.model
             for name, module in model.named_modules():
@@ -100,48 +177,11 @@ class CustomDistEvalHook(BaseDistEvalHook):
         
         if runner.rank == 0:
             print_log('\n', logger=runner.logger)
-            
-            # Get evaluation results
             eval_results = self.evaluate(runner, results)
             if eval_results is None:
                 return None
             
-            # Print per-class metrics
-            if 'classwise' in eval_results:
-                try:
-                    headers = ['Category', 'AP', 'AP50', 'AP75']
-                    table_data = [headers]
-                    
-                    # Organize per-class results
-                    for item in eval_results['classwise']:
-                        if len(item) >= 4:  # Making sure we have all metrics
-                            category, ap, ap50, ap75 = item[:4]
-                            table_data.append([
-                                category,
-                                f'{float(ap):0.3f}',
-                                f'{float(ap50):0.3f}',
-                                f'{float(ap75):0.3f}'
-                            ])
-                    
-                    table = AsciiTable(table_data)
-                    print_log('\nPer-class evaluation:', logger=runner.logger)
-                    print_log('\n' + table.table, logger=runner.logger)
-                except Exception as e:
-                    print_log(f'\nError in printing per-class results: {str(e)}', 
-                             logger=runner.logger)
-
-            # Print detailed metrics
-            print_log('\nOverall metrics:', logger=runner.logger)
-            for metric, value in eval_results.items():
-                if isinstance(value, float):
-                    print_log(f'{metric}: {value:.4f}', logger=runner.logger)
-                elif isinstance(value, str) and metric.endswith('copypaste'):
-                    print_log(f'{metric}: {value}', logger=runner.logger)
-
-            # Print current losses
-            if hasattr(runner, 'outputs') and 'log_vars' in runner.outputs:
-                print_log('\nCurrent Training Losses:', logger=runner.logger)
-                for name, value in runner.outputs['log_vars'].items():
-                    print_log(f'{name}: {value:.4f}', logger=runner.logger)
-
+            # Format and print metrics table
+            table = self._format_metrics_table(eval_results, runner)
+            print_log('\nDetection Performance:\n' + table, logger=runner.logger)
             return eval_results
