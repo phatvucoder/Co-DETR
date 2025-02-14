@@ -24,27 +24,46 @@ class CustomEvalHook(BaseEvalHook):
         
         # Get all evaluation metrics
         eval_results = self.evaluate(runner, results)
+        if eval_results is None:
+            return None
         
         # Print per-class AP if available
         if 'classwise' in eval_results:
-            headers = ['Category', 'AP']
-            table_data = [headers]
-            for category, ap in eval_results['classwise']:
-                table_data.append([category, f'{float(ap):0.3f}'])
-            table = AsciiTable(table_data)
-            print_log('\n' + table.table, logger=runner.logger)
+            try:
+                headers = ['Category', 'AP', 'AP50', 'AP75']
+                table_data = [headers]
+                
+                # Organize per-class results
+                for item in eval_results['classwise']:
+                    if len(item) >= 4:  # Making sure we have all metrics
+                        category, ap, ap50, ap75 = item[:4]
+                        table_data.append([
+                            category,
+                            f'{float(ap):0.3f}',
+                            f'{float(ap50):0.3f}',
+                            f'{float(ap75):0.3f}'
+                        ])
+                
+                table = AsciiTable(table_data)
+                print_log('\nPer-class evaluation:', logger=runner.logger)
+                print_log('\n' + table.table, logger=runner.logger)
+            except Exception as e:
+                print_log(f'\nError in printing per-class results: {str(e)}', 
+                         logger=runner.logger)
 
         # Print detailed metrics
+        print_log('\nOverall metrics:', logger=runner.logger)
         for metric, value in eval_results.items():
             if isinstance(value, float):
-                print_log(f'\n{metric}: {value:.4f}', logger=runner.logger)
+                print_log(f'{metric}: {value:.4f}', logger=runner.logger)
             elif isinstance(value, str) and metric.endswith('copypaste'):
-                print_log(f'\n{metric}: {value}', logger=runner.logger)
+                print_log(f'{metric}: {value}', logger=runner.logger)
 
         # Print current losses
-        print_log('\nCurrent Training Losses:', logger=runner.logger)
-        for name, value in runner.outputs['log_vars'].items():
-            print_log(f'{name}: {value:.4f}', logger=runner.logger)
+        if hasattr(runner, 'outputs') and 'log_vars' in runner.outputs:
+            print_log('\nCurrent Training Losses:', logger=runner.logger)
+            for name, value in runner.outputs['log_vars'].items():
+                print_log(f'{name}: {value:.4f}', logger=runner.logger)
 
         return eval_results
 
@@ -84,18 +103,35 @@ class CustomDistEvalHook(BaseDistEvalHook):
             
             # Get evaluation results
             eval_results = self.evaluate(runner, results)
+            if eval_results is None:
+                return None
             
             # Print per-class metrics
             if 'classwise' in eval_results:
-                headers = ['Category', 'AP']
-                table_data = [headers]
-                for category, ap in eval_results['classwise']:
-                    table_data.append([category, f'{float(ap):0.3f}'])
-                table = AsciiTable(table_data)
-                print_log('\n' + table.table, logger=runner.logger)
+                try:
+                    headers = ['Category', 'AP', 'AP50', 'AP75']
+                    table_data = [headers]
+                    
+                    # Organize per-class results
+                    for item in eval_results['classwise']:
+                        if len(item) >= 4:  # Making sure we have all metrics
+                            category, ap, ap50, ap75 = item[:4]
+                            table_data.append([
+                                category,
+                                f'{float(ap):0.3f}',
+                                f'{float(ap50):0.3f}',
+                                f'{float(ap75):0.3f}'
+                            ])
+                    
+                    table = AsciiTable(table_data)
+                    print_log('\nPer-class evaluation:', logger=runner.logger)
+                    print_log('\n' + table.table, logger=runner.logger)
+                except Exception as e:
+                    print_log(f'\nError in printing per-class results: {str(e)}', 
+                             logger=runner.logger)
 
             # Print detailed metrics
-            print_log('\nDetailed Metrics:', logger=runner.logger)
+            print_log('\nOverall metrics:', logger=runner.logger)
             for metric, value in eval_results.items():
                 if isinstance(value, float):
                     print_log(f'{metric}: {value:.4f}', logger=runner.logger)
@@ -103,8 +139,9 @@ class CustomDistEvalHook(BaseDistEvalHook):
                     print_log(f'{metric}: {value}', logger=runner.logger)
 
             # Print current losses
-            print_log('\nCurrent Training Losses:', logger=runner.logger)
-            for name, value in runner.outputs['log_vars'].items():
-                print_log(f'{name}: {value:.4f}', logger=runner.logger)
+            if hasattr(runner, 'outputs') and 'log_vars' in runner.outputs:
+                print_log('\nCurrent Training Losses:', logger=runner.logger)
+                for name, value in runner.outputs['log_vars'].items():
+                    print_log(f'{name}: {value:.4f}', logger=runner.logger)
 
             return eval_results

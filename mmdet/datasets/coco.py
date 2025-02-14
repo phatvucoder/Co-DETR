@@ -567,18 +567,8 @@ class CocoDataset(CustomDataset):
                              f'{float(ap_75):0.3f}',
                              f'{float(recall):0.3f}'))
 
-                    num_columns = min(6, len(results_per_category) * 2)
-                    results_flatten = list(
-                        itertools.chain(*results_per_category))
-                    headers = ['category', 'AP', 'AP50', 'AP75', 'Recall']
-                    results_2d = itertools.zip_longest(*[
-                        results_flatten[i::num_columns]
-                        for i in range(num_columns)
-                    ])
-                    table_data = [headers]
-                    table_data += [result for result in results_2d]
-                    table = AsciiTable(table_data)
-                    print_log('\n' + table.table, logger=logger)
+                    # Store the per-class results directly in eval_results
+                    eval_results['classwise'] = results_per_category
 
                 if metric_items is None:
                     metric_items = [
